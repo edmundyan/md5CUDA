@@ -50,7 +50,38 @@
    (a) += (b); \
   }
 
+// Accessor for w[16] array. Naively, this would just be w[i]; however, this
+// choice leads to worst-case-scenario access pattern wrt. shared memory
+// bank conflicts, as the same indices in different threads fall into the
+// same bank (as the words are 16 unsigned ints long). The packing below causes the
+// same indices in different threads of a warp to map to different banks. In
+// testing this gave a ~40% speedup.
+//
+// PS: An alternative solution would be to make the w array 17 unsigned ints long
+// (thus wasting a little shared memory)
+//
+__device__ inline unsigned int &getw(unsigned int *w, const int i)
+{
+	return w[(i+threadIdx.x) % 16];
+}
 
+__device__ inline unsigned int getw(const unsigned int *w, const int i)	// const- version
+{
+	return w[(i+threadIdx.x) % 16];
+}
+
+
+
+void inline __device__ GPUshufflegetw(unsigned int* in)
+{
+  unsigned int tmp[16];
+
+  for(int i = 0; i < 16; i++)
+    tmp[i] = in[i];
+
+  for(int i = 0; i < 16; i++)
+    getw(in, i) = tmp[i];
+}
 
 /* Basic MD5 step. Transform buf based on in.
  */
@@ -85,6 +116,24 @@ void inline __device__ md5_v2(const unsigned int *in, unsigned int &a, unsigned 
 	d = d0;
  
   /* Round 1 */
+#ifdef GETW_OPT
+  FF ( a, b, c, d, getw(in,  0), S11, 3614090360); /* 1 */
+  FF ( d, a, b, c, getw(in,  1), S12, 3905402710); /* 2 */
+  FF ( c, d, a, b, getw(in,  2), S13,  606105819); /* 3 */
+  FF ( b, c, d, a, getw(in,  3), S14, 3250441966); /* 4 */
+  FF ( a, b, c, d, getw(in,  4), S11, 4118548399); /* 5 */
+  FF ( d, a, b, c, getw(in,  5), S12, 1200080426); /* 6 */
+  FF ( c, d, a, b, getw(in,  6), S13, 2821735955); /* 7 */
+  FF ( b, c, d, a, getw(in,  7), S14, 4249261313); /* 8 */
+  FF ( a, b, c, d, getw(in,  8), S11, 1770035416); /* 9 */
+  FF ( d, a, b, c, getw(in,  9), S12, 2336552879); /* 10 */
+  FF ( c, d, a, b, getw(in, 10), S13, 4294925233); /* 11 */
+  FF ( b, c, d, a, getw(in, 11), S14, 2304563134); /* 12 */
+  FF ( a, b, c, d, getw(in, 12), S11, 1804603682); /* 13 */
+  FF ( d, a, b, c, getw(in, 13), S12, 4254626195); /* 14 */
+  FF ( c, d, a, b, getw(in, 14), S13, 2792965006); /* 15 */
+  FF ( b, c, d, a, getw(in, 15), S14, 1236535329); /* 16 */
+#else
   FF (a, b, c, d, in[ 0], S11, 0xd76aa478); /* 1 */
   FF (d, a, b, c, in[ 1], S12, 0xe8c7b756); /* 2 */
   FF (c, d, a, b, in[ 2], S13, 0x242070db); /* 3 */
@@ -101,8 +150,27 @@ void inline __device__ md5_v2(const unsigned int *in, unsigned int &a, unsigned 
   FF (d, a, b, c, in[13], S12, 0xfd987193); /* 14 */
   FF (c, d, a, b, in[14], S13, 0xa679438e); /* 15 */
   FF (b, c, d, a, in[15], S14, 0x49b40821); /* 16 */
+#endif
 
  /* Round 2 */
+#ifdef GETW_OPT
+  GG ( a, b, c, d, getw(in,  1), S21, 4129170786); /* 17 */
+  GG ( d, a, b, c, getw(in,  6), S22, 3225465664); /* 18 */
+  GG ( c, d, a, b, getw(in, 11), S23,  643717713); /* 19 */
+  GG ( b, c, d, a, getw(in,  0), S24, 3921069994); /* 20 */
+  GG ( a, b, c, d, getw(in,  5), S21, 3593408605); /* 21 */
+  GG ( d, a, b, c, getw(in, 10), S22,   38016083); /* 22 */
+  GG ( c, d, a, b, getw(in, 15), S23, 3634488961); /* 23 */
+  GG ( b, c, d, a, getw(in,  4), S24, 3889429448); /* 24 */
+  GG ( a, b, c, d, getw(in,  9), S21,  568446438); /* 25 */
+  GG ( d, a, b, c, getw(in, 14), S22, 3275163606); /* 26 */
+  GG ( c, d, a, b, getw(in,  3), S23, 4107603335); /* 27 */
+  GG ( b, c, d, a, getw(in,  8), S24, 1163531501); /* 28 */
+  GG ( a, b, c, d, getw(in, 13), S21, 2850285829); /* 29 */
+  GG ( d, a, b, c, getw(in,  2), S22, 4243563512); /* 30 */
+  GG ( c, d, a, b, getw(in,  7), S23, 1735328473); /* 31 */
+  GG ( b, c, d, a, getw(in, 12), S24, 2368359562); /* 32 */
+#else
   GG (a, b, c, d, in[ 1], S21, 0xf61e2562); /* 17 */
   GG (d, a, b, c, in[ 6], S22, 0xc040b340); /* 18 */
   GG (c, d, a, b, in[11], S23, 0x265e5a51); /* 19 */
@@ -119,8 +187,27 @@ void inline __device__ md5_v2(const unsigned int *in, unsigned int &a, unsigned 
   GG (d, a, b, c, in[ 2], S22, 0xfcefa3f8); /* 30 */
   GG (c, d, a, b, in[ 7], S23, 0x676f02d9); /* 31 */
   GG (b, c, d, a, in[12], S24, 0x8d2a4c8a); /* 32 */
+#endif
 
   /* Round 3 */
+#ifdef GETW_OPT
+  HH ( a, b, c, d, getw(in,  5), S31, 4294588738); /* 33 */
+  HH ( d, a, b, c, getw(in,  8), S32, 2272392833); /* 34 */
+  HH ( c, d, a, b, getw(in, 11), S33, 1839030562); /* 35 */
+  HH ( b, c, d, a, getw(in, 14), S34, 4259657740); /* 36 */
+  HH ( a, b, c, d, getw(in,  1), S31, 2763975236); /* 37 */
+  HH ( d, a, b, c, getw(in,  4), S32, 1272893353); /* 38 */
+  HH ( c, d, a, b, getw(in,  7), S33, 4139469664); /* 39 */
+  HH ( b, c, d, a, getw(in, 10), S34, 3200236656); /* 40 */
+  HH ( a, b, c, d, getw(in, 13), S31,  681279174); /* 41 */
+  HH ( d, a, b, c, getw(in,  0), S32, 3936430074); /* 42 */
+  HH ( c, d, a, b, getw(in,  3), S33, 3572445317); /* 43 */
+  HH ( b, c, d, a, getw(in,  6), S34,   76029189); /* 44 */
+  HH ( a, b, c, d, getw(in,  9), S31, 3654602809); /* 45 */
+  HH ( d, a, b, c, getw(in, 12), S32, 3873151461); /* 46 */
+  HH ( c, d, a, b, getw(in, 15), S33,  530742520); /* 47 */
+  HH ( b, c, d, a, getw(in,  2), S34, 3299628645); /* 48 */
+#else
   HH (a, b, c, d, in[ 5], S31, 0xfffa3942); /* 33 */
   HH (d, a, b, c, in[ 8], S32, 0x8771f681); /* 34 */
   HH (c, d, a, b, in[11], S33, 0x6d9d6122); /* 35 */
@@ -137,8 +224,27 @@ void inline __device__ md5_v2(const unsigned int *in, unsigned int &a, unsigned 
   HH (d, a, b, c, in[12], S32, 0xe6db99e5); /* 46 */
   HH (c, d, a, b, in[15], S33, 0x1fa27cf8); /* 47 */
   HH (b, c, d, a, in[ 2], S34, 0xc4ac5665); /* 48 */
+#endif
 
   /* Round 4 */
+#ifdef GETW_OPT
+  II ( a, b, c, d, getw(in,  0), S41, 4096336452); /* 49 */
+  II ( d, a, b, c, getw(in,  7), S42, 1126891415); /* 50 */
+  II ( c, d, a, b, getw(in, 14), S43, 2878612391); /* 51 */
+  II ( b, c, d, a, getw(in,  5), S44, 4237533241); /* 52 */
+  II ( a, b, c, d, getw(in, 12), S41, 1700485571); /* 53 */
+  II ( d, a, b, c, getw(in,  3), S42, 2399980690); /* 54 */
+  II ( c, d, a, b, getw(in, 10), S43, 4293915773); /* 55 */
+  II ( b, c, d, a, getw(in,  1), S44, 2240044497); /* 56 */
+  II ( a, b, c, d, getw(in,  8), S41, 1873313359); /* 57 */
+  II ( d, a, b, c, getw(in, 15), S42, 4264355552); /* 58 */
+  II ( c, d, a, b, getw(in,  6), S43, 2734768916); /* 59 */
+  II ( b, c, d, a, getw(in, 13), S44, 1309151649); /* 60 */
+  II ( a, b, c, d, getw(in,  4), S41, 4149444226); /* 61 */
+  II ( d, a, b, c, getw(in, 11), S42, 3174756917); /* 62 */
+  II ( c, d, a, b, getw(in,  2), S43,  718787259); /* 63 */
+  II ( b, c, d, a, getw(in,  9), S44, 3951481745); /* 64 */
+#else
   II (a, b, c, d, in[ 0], S41, 0xf4292244); /* 49 */
   II (d, a, b, c, in[ 7], S42, 0x432aff97); /* 50 */
   II (c, d, a, b, in[14], S43, 0xab9423a7); /* 51 */
@@ -155,6 +261,7 @@ void inline __device__ md5_v2(const unsigned int *in, unsigned int &a, unsigned 
   II (d, a, b, c, in[11], S42, 0xbd3af235); /* 62 */
   II (c, d, a, b, in[ 2], S43, 0x2ad7d2bb); /* 63 */
   II (b, c, d, a, in[ 9], S44, 0xeb86d391); /* 64 */
+#endif
 
 	a += a0;
 	b += b0;
@@ -195,7 +302,7 @@ __device__ inline void Decode(unsigned int *output, unsigned char *input, unsign
 
 __device__ inline void Encode(unsigned char *output, unsigned int *input, unsigned int len) {
   /* Encode()
-   * converts a uint[4] array into a uchar[16] array
+   * converts a unsigned int[4] array into a uchar[16] array
   */
   unsigned int i, j;
 
@@ -211,22 +318,36 @@ __device__ inline void Encode(unsigned char *output, unsigned int *input, unsign
 
 __device__ bool generatePermStarting(char *c0, int *starting, int pw_length, char* charset, int charset_len, int idx) {
   // modifies c0 to be a random string perm corresponding to idx in base(charset_len)
-	unsigned int len = 0;
   int i;
-  int idx_orig = idx;
+  int idx_new;
+  int idx_tmp;
   bool reset = true;
 
  for(i = 0; i < 64; i++) {
     if(i >= pw_length) {
+
       c0[i] = 0;
+
     } else {
-      if(idx+starting[i] < charset_len)
+      idx_tmp = idx+starting[i];
+      if(idx_tmp < charset_len)
         reset = false;
-      c0[i] = charset[(idx+starting[i]) % charset_len];
-      idx = (idx+starting[i]) / charset_len;
+
+
+      // old
+      //c0[i] = charset[(idx+starting[i]) % charset_len];
+      //idx = (idx+starting[i]) / charset_len;
+
+      // faster version
+      // trying to replace mods
+      // A % B = A - B * (A/B)
+      idx = idx_tmp / charset_len;
+
+      c0[i] = charset[idx_tmp - charset_len * idx];   
+
+
     }
   }
-
   return reset;
 }
 
@@ -251,33 +372,25 @@ __device__ void generatePerm(char *c0, int pw_length, char *charset, int charset
 
   //printf("%d = '%s'\n", idx_orig, c0);
 }
-__device__ inline void md5_prep(char *c0) {
-	unsigned int len = 0;
-	char *c = c0;
+__device__ inline void md5_prep(char *c0, int pw_length) {
+	//unsigned int len = 0;
 
-	while(*c) {len++; c++;}
+  char *c = c0 + pw_length;
+
+	//while(*c) {len++; c++;}
 	c[0] = 0x80;			// bit 1 after the message
 
+
   // this doesn't look right in the bit representation, but maybe that's ok.. http://nsfsecurity.pr.erau.edu/crypto/md5.html might be wrong
-	((unsigned int*)c0)[14] = len * 8;	// message length in bits
+
+  //if(pw_length == len)
+  //  printf("YES");
+
+  ((unsigned int*)c0)[14] = pw_length * 8;	// message length in bits
+
 }
 
-//__device__ inline int compareMD5Digest(unsigned char *digest, unsigned char *target_digest) {
-//  for(int i = 0; i < 16;i++) {
-//    if(digest[i] != target_digest[i])
-//      return false;
-//  }
-//  return true;
-//}
-//
-//__device__ inline int compareMD5DigestArray(unsigned char *digest, md5Digest *all_digests_d, int digests_length) {
-//  // O(n), serially go through each digest in dictionary
-//  for(int i = 0; i < digests_length; i++) {
-//    if(compareMD5Digest(digest, all_digests_d[i]))
-//      return true;
-//  }
-//  return false;
-//}
+
 //__global__ void md5_kernel(char *charset_d, int charset_len, int pw_length, unsigned char *target_digest_d, int iteration, md5Digest *all_digests_d, int digests_length, md5Plain* returnMD5s)
 __global__ void md5_kernel(int *perm_init_index_d, char *charset_d, int charset_len, int pw_length, md5Plain* returnMD5s)
 {
@@ -293,9 +406,13 @@ __global__ void md5_kernel(int *perm_init_index_d, char *charset_d, int charset_
   __syncthreads();
 
  
-  md5Node *md5Node_arr = (md5Node *) (shared_mem + charset_len + (charset_len%4));
+  //md5Node *md5Node_arr = (md5Node *) (shared_mem + charset_len + (charset_len%4));
+  md5Node *md5Node_arr = (md5Node *) (shared_mem + charset_len + (charset_len & 3));
+
+#ifdef ENABLE_MEMORY
   unsigned char digest[16]; // todo delete?
   char w[64];
+#endif
   int hashes_completed;
   int idx = threadIdx.x + blockIdx.x * blockDim.x;
   int threads_per_kernel = gridDim.x * blockDim.x;
@@ -310,52 +427,44 @@ __global__ void md5_kernel(int *perm_init_index_d, char *charset_d, int charset_
   //  // compute a new idx depending on which iteration of the loop we're on.
   //  int overall_idx = idx + hashes_completed;
 
-  //printf("~1\n");
   for(hashes_completed = idx; hashes_completed < MAX_PERMS_PER_KERNEL; hashes_completed += threads_per_kernel) {
     // compute a new idx depending on which iteration of the loop we're on.
     int overall_idx = hashes_completed;
 
-    //printf("~2");
-//__device__ bool generatePermStarting(char *c0, int *starting, int pw_length, char* charset, int charset_len, int idx) {
-    //printf("%d-idx = %d\n", threadIdx.x, overall_idx);
     if(generatePermStarting(md5Node_arr[threadIdx.x].w, perm_init_index_d, pw_length, charset_shared, charset_len, overall_idx))
     {
       // returned RESET.  There are no more perms
-      // TODO this is shitty because other threads will likely do 1 more iteration if we are "inbetween"
-      //printf("~3\n");
       break; // for
     } else
     {
-      //printf("%d-idx = %d\n", threadIdx.x, overall_idx);
-      //printf("~4");
+#ifdef ENABLE_MEMORY
       // we just got a new perm, calculate the md5 for it!
       // save the original string
       for(int i = 0; i < 64; i++) {
         w[i] = md5Node_arr[threadIdx.x].w[i];
       }
+#endif
 
-      //printf("str = %s\n", w);
       
       // prepare the md5 string (adding the '1' and the length
-      //printf("~5");
-	    md5_prep(md5Node_arr[threadIdx.x].w);
+	    md5_prep(md5Node_arr[threadIdx.x].w, pw_length);
 
+      // need to do a shuffle for getw...
+      GPUshufflegetw((unsigned int *) &(md5Node_arr[threadIdx.x].w));
       // calculate
-      //printf("~6");
       md5_v2((unsigned int *) &md5Node_arr[threadIdx.x].w[0], md5Node_arr[threadIdx.x].state[0], md5Node_arr[threadIdx.x].state[1], md5Node_arr[threadIdx.x].state[2], md5Node_arr[threadIdx.x].state[3]);
 
-      //printf("~7");
-      // encode the 4-wide uint array to a char array
+#ifdef ENABLE_MEMORY
+      // encode the 4-wide unsigned int array to a char array
       Encode(digest, md5Node_arr[threadIdx.x].state, 16);
+#endif
 
-
-      //printf("~8");
-      //printf("idx = %d\n", overall_idx);
-      //for(int i =0; i < 16; i++)
-      //  returnMD5s[overall_idx].digest.d[i] = digest[i];
-      //for(int i =0; i < MAX_PW; i++)
-      //  returnMD5s[overall_idx].plaintext[i] = w[i];
-      //printf("~9\n");
+#ifdef ENABLE_MEMORY
+      for(int i =0; i < 16; i++)
+        returnMD5s[overall_idx].digest.d[i] = digest[i];
+      for(int i =0; i < MAX_PW; i++)
+        returnMD5s[overall_idx].plaintext[i] = w[i];
+#endif
     }
 
     //if(overall_idx < max_iters && (overall_idx-starting_idx) < MAX_PERMS_PER_KERNEL) {
@@ -376,7 +485,7 @@ __global__ void md5_kernel(int *perm_init_index_d, char *charset_d, int charset_
     //  // calculate
     //  md5_v2((unsigned int *) &md5Node_arr[threadIdx.x].w[0], md5Node_arr[threadIdx.x].state[0], md5Node_arr[threadIdx.x].state[1], md5Node_arr[threadIdx.x].state[2], md5Node_arr[threadIdx.x].state[3]);
 
-    //  // encode the 4-wide uint array to a char array
+    //  // encode the 4-wide unsigned int array to a char array
     //  Encode(digest, md5Node_arr[threadIdx.x].state, 16);
 
 
@@ -411,12 +520,12 @@ __global__ void md5_single(char *string_d, int strlen, unsigned char *target_dig
   }
   printf("input=%s\n",single_md5Node.w); 
   // prepare the md5 string (adding the '1' and the length
-  md5_prep(single_md5Node.w);
+  md5_prep(single_md5Node.w, strlen);
 
   // calculate
   md5_v2((unsigned int *) &single_md5Node.w[0], single_md5Node.state[0], single_md5Node.state[1], single_md5Node.state[2], single_md5Node.state[3]);
 
-  // encode the 4-wide uint array to a char array
+  // encode the 4-wide unsigned int array to a char array
   Encode(target_digest_d, single_md5Node.state, 16);
 
   //// print out the hash!
@@ -447,9 +556,11 @@ void MD5StringCuda_pre(int shared_mem_block, char* &charset_h, char* &charset_d,
 
   // malloc the return array of hashes.
   printf("allocating %d bytes\n", MAX_PERMS_PER_KERNEL * sizeof(md5Plain));
-  /*checkCudaErrors(cudaMalloc(&returnMd5s_d, MAX_PERMS_PER_KERNEL * sizeof(md5Plain)));*/
-  // FIX THIS OMG
-  checkCudaErrors(cudaMalloc(&returnMd5s_d, 1 * sizeof(md5Plain)));
+#ifdef ENABLE_MEMORY
+    checkCudaErrors(cudaMalloc(&returnMd5s_d, MAX_PERMS_PER_KERNEL * sizeof(md5Plain)));
+#else
+    checkCudaErrors(cudaMalloc(&returnMd5s_d, 1 * sizeof(md5Plain)));
+#endif
 
   // malloc starting permutation array
   checkCudaErrors(cudaMalloc(&perm_init_index_d, MAX_PW * sizeof(int)));
@@ -469,7 +580,9 @@ bool MD5StringCuda_kernel(dim3 dimGrid, dim3 dimBlock, int shared_mem_block, int
     return error;
 
   // copy the md5s calculated back to the host
-  //checkCudaErrors(cudaMemcpy(returnMd5s_h, returnMd5s_d, MAX_PERMS_PER_KERNEL * sizeof(md5Plain), cudaMemcpyDeviceToHost));
+#ifdef ENABLE_MEMORY
+  checkCudaErrors(cudaMemcpy(returnMd5s_h, returnMd5s_d, MAX_PERMS_PER_KERNEL * sizeof(md5Plain), cudaMemcpyDeviceToHost));
+#endif
 }
 
 //void MD5StringCuda(dim3 dimGrid, dim3 dimBlock, char *charset, md5Digest *all_digests_h, int digests_length) {

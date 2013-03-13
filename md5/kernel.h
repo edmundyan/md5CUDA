@@ -3,7 +3,8 @@
 //#define WIN32 // wtf?
 
 #define MAX_PW 10
-#define MAX_PERMS_PER_KERNEL 10000000
+#define MAX_PERMS_PER_KERNEL 50000000
+//#define GETW_OPT
 
 
 typedef struct
@@ -17,6 +18,8 @@ typedef struct
   // state - stores the 4 ints a,b,c,d
   char w[64];
   unsigned int state[4];
+  // this is 80 bytes, make it (32*3) + 1 for bank conflicts. assume 32 banks
+  //char padding[17];
 } md5Node;
 
 

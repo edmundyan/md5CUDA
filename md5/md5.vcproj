@@ -188,6 +188,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\eyanHash.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\kernel.cu"
 				>
 				<FileConfiguration
@@ -219,6 +223,10 @@
 			>
 			<File
 				RelativePath=".\deviceQuery.h"
+				>
+			</File>
+			<File
+				RelativePath=".\eyanHash.h"
 				>
 			</File>
 			<File

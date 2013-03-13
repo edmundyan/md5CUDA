@@ -1,11 +1,12 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 #include <iostream>
 #include <functional>
 #include <string>
 #include <time.h>
 #include <boost/unordered_map.hpp>
-
+#include "string.h"
 
 
 
@@ -14,7 +15,8 @@
 #include "kernel.h"
 #include "utils_cpu.h"
 #include "deviceQuery.h"
-#include "string.h"
+#include "eyanHash.h"
+
 // MD5(C, Rivest)
 #include "global.h"
 #include "md5.h"
@@ -25,7 +27,9 @@ struct md5Digest_hash
   std::size_t operator()(md5Digest const& e) const
   {
     std::size_t seed = 0;
-    boost::hash_combine(seed, e.d[0]);
+    for(int i = 0; i < 6; i++) {
+      boost::hash_combine(seed, e.d[i]);
+    }
     return seed;
   }
 };
@@ -44,10 +48,6 @@ struct md5Digest_equalto
 };
 typedef boost::unordered_map<md5Digest, int, md5Digest_hash, md5Digest_equalto> map;
 
-// --------------
-
-// -----
-
 
 int compareMD5Digest(unsigned char *digest, unsigned char *target_digest) {
   for(int i = 0; i < 16;i++) {
@@ -56,31 +56,6 @@ int compareMD5Digest(unsigned char *digest, unsigned char *target_digest) {
   }
   return true;
 }
-
-//cpuCheckMD5Intersection(returnMd5s_h, pw_length, all_digests_h, digests_length);
-//void cpuCheckMD5Intersection(md5Plain* returnMd5s_h, int charset_len, int pw_length, md5Digest *all_digests_h, int digests_length, map all_digests_hash){
-//  // loop over everything hash inside returnMd5s, and see if the hash equals any of the digests
-//  // inside all_digests_h
-//  
-//  // the min of the two
-//  int max_iters = pow((float)charset_len, (float)pw_length);
-//  if(max_iters > MAX_PERMS_PER_KERNEL)
-//    max_iters = MAX_PERMS_PER_KERNEL;
-//
-//  printf("\n");
-//  for(int i = 0; i < max_iters; i++) {
-//    for(int j = 0; j < digests_length; j++) {
-//      if(compareMD5Digest(returnMd5s_h[i], all_digests_h[j])) {
-//        printf("md5('%s') = '"HEXMD5PATTERN"'\n", returnMd5s_h[i].plaintext, HEXMD5(returnMd5s_h[i].digest));
-//        break;
-//      }
-//    }
-//  }
-//
-//  printf("\nthe max iters = %d\n", max_iters);
-//
-//}
-
 
 void convertmd5HashFile() {
   char line[80];
@@ -115,7 +90,7 @@ void importmd5HashFile(char* filename, md5Digest *dbArray, map &dbHashes) {
     // remove newline char
     line[strlen(line)-1] = '\0';
     sscanf(line, ""HEXMD5PATTERN, HEXMD5SCAN(dbArray[i].d));
-    printf("importing "HEXMD5PATTERN"\n",  HEXMD5(dbArray[i].d));
+    //printf("importing "HEXMD5PATTERN"\n",  HEXMD5(dbArray[i].d));
     //md5HashTable[all_digests[i]] = 1;
     // does this create the key??
     dbHashes[dbArray[i]];
@@ -181,20 +156,22 @@ void printBruteForce(char* charset, int len) {
 
 }
 
+static int total_hashes_cracked = 0;
 
+void cpuIntersectDatabaseHashes(md5Plain* returnMd5s_h, map &dbHashes, int charset_len, int pw_length) {
+  int max_iters = pow((float)charset_len, (float)pw_length);
+  if(max_iters < 0.0 || max_iters > MAX_PERMS_PER_KERNEL)
+    max_iters = MAX_PERMS_PER_KERNEL;
 
-void cpuIntersectDatabaseHashes(md5Plain* returnMd5s_h, map &dbHashes, int max_iters) {
-  int max_mini_loops = max_iters;
-  if(max_mini_loops > MAX_PERMS_PER_KERNEL)
-    max_mini_loops = MAX_PERMS_PER_KERNEL;
-
-  printf("max_mini_loops = %d\n", max_mini_loops);
-  for(int k = 0; k < max_mini_loops; k++) {
-    if (dbHashes.count(returnMd5s_h[k].digest)) {
+  //printf("max_iters = %d\n", max_iters);
+  for(int i = 0; i < max_iters; i++) {
+    //if (dbHashes.count(returnMd5s_h[i].digest)) {
+    if(dbHashes.find(returnMd5s_h[i].digest) != dbHashes.end()) {
+      total_hashes_cracked++;
       // FOUND A MATCH
-      printf("FOUND A MATCH\n");
-      printf("%s\n", returnMd5s_h[k].plaintext);
-      printf(HEXMD5PATTERN"\n", HEXMD5(returnMd5s_h[k].digest.d));
+      //printf("FOUND A MATCH\n");
+      //printf("%s\n", returnMd5s_h[i].plaintext);
+      //printf(HEXMD5PATTERN"\n", HEXMD5(returnMd5s_h[i].digest.d));
     }
   }
 }
@@ -204,8 +181,11 @@ void bruteForceLaunch(dim3 dimGrid, dim3 dimBlock, char *charset, int digests_le
   char* charset_d;
   md5Plain* returnMd5s_d;
   md5Plain* returnMd5s_h;
+#ifdef ENABLE_MEMORY
+  returnMd5s_h = new md5Plain[MAX_PERMS_PER_KERNEL];
+#endif
   int* perm_init_index_d;
-  //md5Plain* returnMd5s_h = new md5Plain[MAX_PERMS_PER_KERNEL];
+  
 
 
   // local vars
@@ -225,6 +205,8 @@ void bruteForceLaunch(dim3 dimGrid, dim3 dimBlock, char *charset, int digests_le
 
 
   begin_all=clock();
+
+  double cmp_total = 0.0;
   // for i=1..7
   for(int pw_length = 6; pw_length < 7; pw_length++) {
     // zero out our init perm
@@ -246,10 +228,19 @@ void bruteForceLaunch(dim3 dimGrid, dim3 dimBlock, char *charset, int digests_le
         printf("ABORT! ABORT!!!!!\n");
         exit(1);
       }
-
       end=clock();
       printf("Kernel: %lf secs\n", double(diffclock(end, begin)/1000.0));
 
+
+      //compare returned value to database
+#ifdef ENABLE_MEMORY
+      begin=clock();
+      cpuIntersectDatabaseHashes(returnMd5s_h, dbHashes, strlen(charset), pw_length);
+      end=clock();
+      printf("Database Cmp: %lf secs\n", double(diffclock(end, begin)/1000.0));
+      cmp_total += double(diffclock(end, begin)/1000.0);
+#endif
+       
 
       // update the initial permutation
       if(generatePermStartingIndicesCPU(perm_init_index, pw_length, strlen(charset), MAX_PERMS_PER_KERNEL)) {
@@ -279,6 +270,8 @@ void bruteForceLaunch(dim3 dimGrid, dim3 dimBlock, char *charset, int digests_le
   }
   end_all=clock();
   printf("Time Elapsed: %lf secs\n", double(diffclock(end_all, begin_all)/1000.0));
+  printf("Total Hashes Cracked: %d\n", total_hashes_cracked);
+  printf("Total cmp time %lf\n", cmp_total);
 
   
 
@@ -322,6 +315,18 @@ int main()
   int loop = 1;
   char charset[26+1] = "abcdefghijklmnopqrstuvwxyz";
 
+
+
+  //for(i = 0; i < 10; i++) {
+  //  errno = 0;
+  //  int result = pow((float)26, (float)i);
+
+  //  if( result < 0 ) {
+  //    printf("asds");
+  //  }
+  //  printf("%d - %d\n", i, result);
+  //}
+  //return 1;
 
   //int perm_init_index[10] = {0};
   //int perm_init_new[10] = {0};
@@ -377,13 +382,17 @@ int main()
   //convertmd5HashFile();
 
   
-  int lines = 10; // TODO HACK
-  char filename[80] = "md5_mini.txt";
+  //int lines = 10; // TODO HACK
+  //char filename[80] = "md5_mini.txt";
   //int lines = 453492; // TODO HACK
   //char filename[80] = "yahoo-md5.txt";
 
+  int lines = 100000; // TODO HACK
+  char filename[80] = "yahoo-md5-100000.txt";
+
   // stored serially in array
   md5Digest *dbArray;
+  md5Digest *dbArrayGhettoHash;
   dbArray = new md5Digest[lines];
 
   // stored in a boost::unordered_map
@@ -392,6 +401,9 @@ int main()
   printf("importing md5 hashes...");
   importmd5HashFile(filename, dbArray, dbHashes);
   printf("DONE!\n");
+
+  //convertToGhettoHash(dbArray, dbArrayGhettoHash, lines);
+  //return 0;
 
   
   //printBruteForce(charset, 5);
@@ -403,6 +415,9 @@ int main()
   dim3 dimBlock(256, 1, 1);
   
   
+  printf("sizeof md5Node = %d\n", sizeof(md5Node));
+  printf("sizeof char = %d\n", sizeof(char));
+  printf("sizeof unsigned int = %d\n", sizeof(unsigned int));
   bruteForceLaunch(dimGrid, dimBlock, charset, lines, dbArray, dbHashes);
   //MD5StringCuda(dimGrid, dimBlock, charset, all_digests, lines, all_digests_hash);
 	// C++ function call
